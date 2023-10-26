@@ -1,5 +1,5 @@
 use webgpu_playground::run;
 
 fn main() {
-    run();
+    pollster::block_on(run());
 }
