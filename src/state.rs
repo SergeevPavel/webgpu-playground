@@ -1,6 +1,7 @@
 use std::f64::consts::PI;
 
-use winit::{window::Window, event::WindowEvent, dpi::PhysicalPosition};
+use wgpu::{Device, SurfaceConfiguration};
+use winit::{window::Window, event::{WindowEvent, ElementState}, dpi::PhysicalPosition};
 
 pub struct State {
     surface: wgpu::Surface,
@@ -10,7 +11,9 @@ pub struct State {
     pub size: winit::dpi::PhysicalSize<u32>,
     window: Window,
     background_color: wgpu::Color,
-    render_pipeline: wgpu::RenderPipeline
+    render_pipeline_brown: wgpu::RenderPipeline,
+    render_pipeline_colored: wgpu::RenderPipeline,
+    use_colored: bool
 }
 
 impl State {
@@ -83,7 +86,7 @@ impl State {
             push_constant_ranges: &[],
         });
 
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let render_pipeline_brown = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
@@ -121,6 +124,7 @@ impl State {
             multiview: None, // 5.
         });
 
+        let render_pipeline_colored = Self::create_render_colored_pipeline(&device, &config);
         Self {
             surface,
             device,
@@ -129,8 +133,59 @@ impl State {
             size,
             window,
             background_color,
-            render_pipeline
+            render_pipeline_brown,
+            render_pipeline_colored,
+            use_colored: false
         }
+    }
+
+    pub fn create_render_colored_pipeline(device: &Device, config: &SurfaceConfiguration) -> wgpu::RenderPipeline {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Colored triangle shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("colored_triangle.wgsl").into()),
+        });
+        let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Render Pipeline Layout"),
+            bind_group_layouts: &[],
+            push_constant_ranges: &[],
+        });
+        return device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Render Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main", // 1.
+                buffers: &[], // 2.
+            },
+            fragment: Some(wgpu::FragmentState { // 3.
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState { // 4.
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList, // 1.
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw, // 2.
+                cull_mode: Some(wgpu::Face::Back),
+                // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
+                polygon_mode: wgpu::PolygonMode::Fill,
+                // Requires Features::DEPTH_CLIP_CONTROL
+                unclipped_depth: false,
+                // Requires Features::CONSERVATIVE_RASTERIZATION
+                conservative: false,
+            },
+            depth_stencil: None, // 1.
+            multisample: wgpu::MultisampleState {
+                count: 1, // 2.
+                mask: !0, // 3.
+                alpha_to_coverage_enabled: false, // 4.
+            },
+            multiview: None, // 5.
+        });
     }
 
     pub fn window(&self) -> &Window {
@@ -152,6 +207,15 @@ impl State {
                 self.background_color = position_to_color(position);
                 true
             },
+            WindowEvent::KeyboardInput { device_id, input, is_synthetic } => {
+                if input.virtual_keycode == Some(winit::event::VirtualKeyCode::Space) &&
+                   input.state == ElementState::Pressed {
+                    self.use_colored = !self.use_colored;
+                    true
+                } else {
+                    false
+                }
+            }
             _ => false
         }
     }
@@ -180,7 +244,11 @@ impl State {
                 })],
                 depth_stencil_attachment: None,
             });
-            render_pass.set_pipeline(&self.render_pipeline);
+            if (self.use_colored) {
+                render_pass.set_pipeline(&self.render_pipeline_colored);
+            } else {
+                render_pass.set_pipeline(&self.render_pipeline_brown);
+            }
             render_pass.draw(0..3, 0..1);
         }
 
