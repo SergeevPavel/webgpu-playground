@@ -1,6 +1,6 @@
 use std::f64::consts::PI;
 
-use wgpu::{Device, SurfaceConfiguration};
+use wgpu::{Device, SurfaceConfiguration, util::DeviceExt};
 use winit::{window::Window, event::{WindowEvent, ElementState}, dpi::PhysicalPosition};
 
 pub struct State {
@@ -13,7 +13,9 @@ pub struct State {
     background_color: wgpu::Color,
     render_pipeline_brown: wgpu::RenderPipeline,
     render_pipeline_colored: wgpu::RenderPipeline,
-    use_colored: bool
+    use_colored: bool,
+    num_vertices: u32,
+    vertex_buffer: wgpu::Buffer,
 }
 
 impl State {
@@ -92,7 +94,7 @@ impl State {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main", // 1.
-                buffers: &[], // 2.
+                buffers: &[Vertex::desc()], // 2.
             },
             fragment: Some(wgpu::FragmentState { // 3.
                 module: &shader,
@@ -125,6 +127,16 @@ impl State {
         });
 
         let render_pipeline_colored = Self::create_render_colored_pipeline(&device, &config);
+
+        let num_vertices = VERTICES.len() as u32;
+        let vertex_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Vertex Buffer"),
+                contents: bytemuck::cast_slice(VERTICES),
+                usage: wgpu::BufferUsages::VERTEX,
+            }
+        );
+
         Self {
             surface,
             device,
@@ -135,7 +147,9 @@ impl State {
             background_color,
             render_pipeline_brown,
             render_pipeline_colored,
-            use_colored: false
+            use_colored: false,
+            num_vertices,
+            vertex_buffer
         }
     }
 
@@ -155,7 +169,7 @@ impl State {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main", // 1.
-                buffers: &[], // 2.
+                buffers: &[Vertex::desc()], // 2.
             },
             fragment: Some(wgpu::FragmentState { // 3.
                 module: &shader,
@@ -249,7 +263,8 @@ impl State {
             } else {
                 render_pass.set_pipeline(&self.render_pipeline_brown);
             }
-            render_pass.draw(0..3, 0..1);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.draw(0..self.num_vertices, 0..1);
         }
 
         // submit will accept anything that implements IntoIter
@@ -268,3 +283,38 @@ fn position_to_color(p: &PhysicalPosition<f64>) -> wgpu::Color {
         a: 1.0,
     }
 }
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug,  bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+    position: [f32; 3],
+    color: [f32; 3],
+}
+
+// lib.rs
+impl Vertex {
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x3,
+                }
+            ]
+        }
+    }
+}
+
+const VERTICES: &[Vertex] = &[
+    Vertex { position: [0.0, 0.5, 0.0], color: [1.0, 0.0, 0.0] },
+    Vertex { position: [-0.5, -0.5, 0.0], color: [0.0, 1.0, 0.0] },
+    Vertex { position: [0.5, -0.5, 0.0], color: [0.0, 0.0, 1.0] },
+    ];
