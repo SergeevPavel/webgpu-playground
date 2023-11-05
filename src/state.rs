@@ -7,7 +7,7 @@ use winit::{
     window::Window,
 };
 
-use crate::{texture, camera::{Camera, CameraUniform}};
+use crate::{texture, camera::{Camera, CameraUniform, CameraController}};
 
 pub struct State {
     surface: wgpu::Surface,
@@ -24,6 +24,7 @@ pub struct State {
     index_buffer: wgpu::Buffer,
     diffuse_bind_group: wgpu::BindGroup,
     camera: Camera,
+    camera_controller: CameraController,
     camera_bind_group: wgpu::BindGroup,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer
@@ -206,6 +207,8 @@ impl State {
             label: Some("camera_bind_group"),
         });
 
+        let camera_controller = CameraController::new(0.2);
+
         let render_pipeline = Self::create_render_pipeline(&device, &config, &[&texture_bind_group_layout,
                                                                                &camera_bind_group_layout]);
 
@@ -224,6 +227,7 @@ impl State {
             index_buffer,
             diffuse_bind_group,
             camera,
+            camera_controller,
             camera_uniform,
             camera_buffer,
             camera_bind_group
@@ -305,11 +309,17 @@ impl State {
                 self.background_color = position_to_color(position);
                 true
             }
-            _ => false,
+            _ => {
+                self.camera_controller.process_events(event)
+            },
         }
     }
 
-    pub fn update(&mut self) {}
+    pub fn update(&mut self) {
+        self.camera_controller.update_camera(&mut self.camera);
+        self.camera_uniform.update_view_proj(&self.camera);
+        self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
+    }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
