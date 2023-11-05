@@ -1,8 +1,8 @@
+use wgpu::util::DeviceExt;
 use winit::event::{VirtualKeyCode, WindowEvent, KeyboardInput, ElementState};
 
 
-
-pub struct Camera {
+pub struct CameraModel {
     pub eye: cgmath::Point3<f32>,
     pub target: cgmath::Point3<f32>,
     pub up: cgmath::Vector3<f32>,
@@ -12,7 +12,7 @@ pub struct Camera {
     pub zfar: f32,
 }
 
-impl Camera {
+impl CameraModel {
     fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
         // 1.
         let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
@@ -49,7 +49,7 @@ impl CameraUniform {
         }
     }
 
-    pub fn update_view_proj(&mut self, camera: &Camera) {
+    pub fn update_view_proj(&mut self, camera: &CameraModel) {
         self.view_proj = camera.build_view_projection_matrix().into();
     }
 }
@@ -108,7 +108,7 @@ impl CameraController {
         }
     }
 
-    pub fn update_camera(&self, camera: &mut Camera) {
+    pub fn update_camera(&self, camera: &mut CameraModel) {
         use cgmath::InnerSpace;
         let forward = camera.target - camera.eye;
         let forward_norm = forward.normalize();
@@ -138,5 +138,89 @@ impl CameraController {
         if self.is_left_pressed {
             camera.eye = camera.target - (forward - right * self.speed).normalize() * forward_mag;
         }
+    }
+}
+
+pub struct CameraState {
+    pub model: CameraModel,
+    pub controller: CameraController,
+    pub uniform: CameraUniform,
+    pub buffer: wgpu::Buffer,
+    pub bind_group: wgpu::BindGroup,
+}
+
+impl CameraState {
+    pub fn new(device: &wgpu::Device,
+               width: u32,
+               height: u32,
+               layout: &wgpu::BindGroupLayout) -> Self {
+        let camera = CameraModel {
+            // position the camera one unit up and 2 units back
+            // +z is out of the screen
+            eye: cgmath::Point3::new(0.0, 1.0, 2.0),
+            // have it look at the origin
+            target: cgmath::Point3::new(0.0, 0.0, 0.0),
+            // which way is "up"
+            up: cgmath::Vector3::unit_y(),
+            aspect: width as f32 / height as f32,
+            fovy: 45.0,
+            znear: 0.1,
+            zfar: 100.0,
+        };
+        let mut camera_uniform = CameraUniform::new();
+        camera_uniform.update_view_proj(&camera);
+
+        let camera_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Camera Buffer"),
+                contents: bytemuck::cast_slice(&[camera_uniform]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            }
+        );
+
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                }
+            ],
+            label: Some("camera_bind_group"),
+        });
+
+        let controller = CameraController::new(0.2);
+
+        return Self {
+            model: camera,
+            uniform: camera_uniform,
+            controller: controller,
+            buffer: camera_buffer,
+            bind_group: camera_bind_group
+        }
+    }
+
+    pub fn layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }
+            ],
+            label: Some("camera_bind_group_layout"),
+        })
+    }
+
+    pub fn update(&mut self, queue: &wgpu::Queue) {
+        self.controller.update_camera(&mut self.model);
+        self.uniform.update_view_proj(&self.model);
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
     }
 }
