@@ -1,13 +1,11 @@
 mod state;
 mod texture;
 
-use std::f64::consts::PI;
-
 use state::State;
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder, dpi::{Position, PhysicalPosition},
+    window::WindowBuilder,
 };
 
 #[cfg(target_arch = "wasm32")]

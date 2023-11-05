@@ -1,9 +1,9 @@
 use std::f64::consts::PI;
 
-use wgpu::{util::{DeviceExt, RenderEncoder}, Device, SurfaceConfiguration, BindGroupLayout};
+use wgpu::{util::{DeviceExt}, Device, SurfaceConfiguration, BindGroupLayout};
 use winit::{
     dpi::PhysicalPosition,
-    event::{ElementState, WindowEvent},
+    event::{WindowEvent},
     window::Window,
 };
 
@@ -17,7 +17,7 @@ pub struct State {
     pub size: winit::dpi::PhysicalSize<u32>,
     window: Window,
     background_color: wgpu::Color,
-    render_pipeline_colored: wgpu::RenderPipeline,
+    render_pipeline: wgpu::RenderPipeline,
     num_vertices: u32,
     vertex_buffer: wgpu::Buffer,
     num_indices: u32,
@@ -136,7 +136,7 @@ impl State {
             }
         );
 
-        let render_pipeline_colored = Self::create_render_colored_pipeline(&device, &config, &[&texture_bind_group_layout]);
+        let render_pipeline = Self::create_render_pipeline(&device, &config, &[&texture_bind_group_layout]);
 
         let num_vertices = VERTICES.len() as u32;
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -160,7 +160,7 @@ impl State {
             size,
             window,
             background_color: position_to_color(&PhysicalPosition { x: 0f64, y: 0f64 }),
-            render_pipeline_colored,
+            render_pipeline,
             num_vertices,
             vertex_buffer,
             num_indices,
@@ -169,7 +169,7 @@ impl State {
         }
     }
 
-    pub fn create_render_colored_pipeline(
+    pub fn create_render_pipeline(
         device: &Device,
         config: &SurfaceConfiguration,
         bind_group_layouts: &[&BindGroupLayout]
@@ -244,13 +244,6 @@ impl State {
                 self.background_color = position_to_color(position);
                 true
             }
-            WindowEvent::KeyboardInput {
-                device_id,
-                input,
-                is_synthetic,
-            } => {
-                false
-            }
             _ => false,
         }
     }
@@ -281,7 +274,7 @@ impl State {
                 })],
                 depth_stencil_attachment: None,
             });
-            render_pass.set_pipeline(&self.render_pipeline_colored);
+            render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
