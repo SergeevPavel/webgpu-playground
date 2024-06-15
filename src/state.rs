@@ -8,6 +8,7 @@ use winit::{
 };
 
 use crate::{texture, camera::{CameraModel, CameraUniform, CameraController, CameraState}};
+use crate::rotator::Rotator;
 
 pub struct State {
     surface: wgpu::Surface,
@@ -23,7 +24,8 @@ pub struct State {
     num_indices: u32,
     index_buffer: wgpu::Buffer,
     diffuse_bind_group: wgpu::BindGroup,
-    camera: CameraState
+    camera: CameraState,
+    rotator: Rotator,
 }
 
 impl State {
@@ -154,11 +156,14 @@ impl State {
 
 
         let camera_bind_group_layout = CameraState::layout(&device);
-
         let  camera_state = CameraState::new(&device, config.width, config.height, &camera_bind_group_layout);
 
+        let rotator_bind_group_layout = Rotator::layout(&device);
+        let rotator = Rotator::new(&device, &rotator_bind_group_layout);
+
         let render_pipeline = Self::create_render_pipeline(&device, &config, &[&texture_bind_group_layout,
-                                                                               &camera_bind_group_layout]);
+                                                                               &camera_bind_group_layout,
+                                                                               &rotator_bind_group_layout]);
 
         Self {
             surface,
@@ -174,6 +179,7 @@ impl State {
             num_indices,
             index_buffer,
             camera: camera_state,
+            rotator,
             diffuse_bind_group,
         }
     }
@@ -261,6 +267,7 @@ impl State {
 
     pub fn update(&mut self) {
         self.camera.update(&self.queue);
+        self.rotator.update(&self.queue);
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -290,6 +297,7 @@ impl State {
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_bind_group(1, &self.camera.bind_group, &[]);
+            render_pass.set_bind_group(2, &self.rotator.bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..self.num_indices, 0, 0..1)
@@ -342,15 +350,15 @@ impl Vertex {
 }
 
 const VERTICES: &[Vertex] = &[
-    Vertex { position: [-0.5, -0.5, 0.0], tex_coords: [0.0, 0.0], },
-    Vertex { position: [0.5, -0.5, 0.0], tex_coords: [1.0, 0.0], },
-    Vertex { position: [0.5, 0.5, 0.0], tex_coords: [1.0, 1.0], },
-    Vertex { position: [-0.5, 0.5, 0.0], tex_coords: [0.0, 1.0], },
+    Vertex { position: [-0.5, -0.5, -0.5], tex_coords: [0.0, 0.0], },
+    Vertex { position: [0.5, -0.5, -0.5], tex_coords: [1.0, 0.0], },
+    Vertex { position: [0.5, 0.5, -0.5], tex_coords: [1.0, 1.0], },
+    Vertex { position: [-0.5, 0.5, -0.5], tex_coords: [0.0, 1.0], },
 
-    Vertex { position: [-0.5, -0.5, 1.0], tex_coords: [0.0, 0.0], },
-    Vertex { position: [0.5, -0.5, 1.0], tex_coords: [1.0, 0.0], },
-    Vertex { position: [0.5, 0.5, 1.0], tex_coords: [1.0, 1.0], },
-    Vertex { position: [-0.5, 0.5, 1.0], tex_coords: [0.0, 1.0], },
+    Vertex { position: [-0.5, -0.5, 0.5], tex_coords: [0.0, 0.0], },
+    Vertex { position: [0.5, -0.5, 0.5], tex_coords: [1.0, 0.0], },
+    Vertex { position: [0.5, 0.5, 0.5], tex_coords: [1.0, 1.0], },
+    Vertex { position: [-0.5, 0.5, 0.5], tex_coords: [0.0, 1.0], },
     ];
 
 const INDICES: &[u16] = &[

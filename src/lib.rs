@@ -1,6 +1,7 @@
 mod state;
 mod texture;
 mod camera;
+mod rotator;
 
 use state::State;
 use winit::{
