@@ -1,7 +1,8 @@
 mod state;
 mod texture;
 mod camera;
-mod rotator;
+mod instances;
+mod mesh;
 
 use state::State;
 use winit::{

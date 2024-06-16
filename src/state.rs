@@ -8,7 +8,8 @@ use winit::{
 };
 
 use crate::{texture, camera::{CameraModel, CameraUniform, CameraController, CameraState}};
-use crate::rotator::Rotator;
+use crate::mesh::{Mesh, Vertex};
+use crate::instances::{Instances, Rotation};
 
 pub struct State {
     surface: wgpu::Surface,
@@ -19,13 +20,11 @@ pub struct State {
     window: Window,
     background_color: wgpu::Color,
     render_pipeline: wgpu::RenderPipeline,
-    num_vertices: u32,
-    vertex_buffer: wgpu::Buffer,
-    num_indices: u32,
-    index_buffer: wgpu::Buffer,
+    mesh: Mesh,
     diffuse_bind_group: wgpu::BindGroup,
     camera: CameraState,
-    rotator: Rotator,
+    rotator: Rotation,
+    pub instances: Instances,
 }
 
 impl State {
@@ -127,43 +126,31 @@ impl State {
                 layout: &texture_bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
-                    binding: 0,
+                        binding: 0,
                         resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                },
+                    },
                     wgpu::BindGroupEntry {
-                    binding: 1,
+                        binding: 1,
                         resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                }
+                    }
                 ],
                 label: Some("diffuse_bind_group"),
             }
         );
 
-        let num_vertices = VERTICES.len() as u32;
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-        let num_indices = INDICES.len() as u32;
-
-
+        let mesh = Mesh::new(&device);
 
         let camera_bind_group_layout = CameraState::layout(&device);
-        let  camera_state = CameraState::new(&device, config.width, config.height, &camera_bind_group_layout);
+        let camera_state = CameraState::new(&device, config.width, config.height, &camera_bind_group_layout);
 
-        let rotator_bind_group_layout = Rotator::layout(&device);
-        let rotator = Rotator::new(&device, &rotator_bind_group_layout);
+        let rotator_bind_group_layout = Rotation::layout(&device);
+        let rotator = Rotation::new(&device, &rotator_bind_group_layout);
+        let instances = Instances::new(&device);
 
         let render_pipeline = Self::create_render_pipeline(&device, &config, &[&texture_bind_group_layout,
                                                                                &camera_bind_group_layout,
-                                                                               &rotator_bind_group_layout]);
+                                                                               &rotator_bind_group_layout,
+                                                                               &instances.layout]);
 
         Self {
             surface,
@@ -174,12 +161,10 @@ impl State {
             window,
             background_color: position_to_color(&PhysicalPosition { x: 0f64, y: 0f64 }),
             render_pipeline,
-            num_vertices,
-            vertex_buffer,
-            num_indices,
-            index_buffer,
+            mesh,
             camera: camera_state,
             rotator,
+            instances,
             diffuse_bind_group,
         }
     }
@@ -204,24 +189,22 @@ impl State {
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",     // 1.
-                buffers: &[Vertex::desc()], // 2.
+                entry_point: "vs_main",
+                buffers: &[Vertex::desc()],
             },
             fragment: Some(wgpu::FragmentState {
-                // 3.
                 module: &shader,
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
-                    // 4.
                     format: config.format,
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList, // 1.
+                topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw, // 2.
+                front_face: wgpu::FrontFace::Ccw,
                 cull_mode: Some(wgpu::Face::Back),
                 // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
                 polygon_mode: wgpu::PolygonMode::Fill,
@@ -298,9 +281,10 @@ impl State {
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_bind_group(1, &self.camera.bind_group, &[]);
             render_pass.set_bind_group(2, &self.rotator.bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..1)
+            render_pass.set_bind_group(3, &self.instances.bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.mesh.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.draw_indexed(0..self.mesh.num_indices, 0, 0..self.instances.count())
         }
 
         // submit will accept anything that implements IntoIter
@@ -319,64 +303,3 @@ fn position_to_color(p: &PhysicalPosition<f64>) -> wgpu::Color {
         a: 1.0,
     }
 }
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vertex {
-    position: [f32; 3],
-    tex_coords: [f32; 2],
-}
-
-// lib.rs
-impl Vertex {
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-            ],
-        }
-    }
-}
-
-const VERTICES: &[Vertex] = &[
-    Vertex { position: [-0.5, -0.5, -0.5], tex_coords: [0.0, 0.0], },
-    Vertex { position: [0.5, -0.5, -0.5], tex_coords: [1.0, 0.0], },
-    Vertex { position: [0.5, 0.5, -0.5], tex_coords: [1.0, 1.0], },
-    Vertex { position: [-0.5, 0.5, -0.5], tex_coords: [0.0, 1.0], },
-
-    Vertex { position: [-0.5, -0.5, 0.5], tex_coords: [0.0, 0.0], },
-    Vertex { position: [0.5, -0.5, 0.5], tex_coords: [1.0, 0.0], },
-    Vertex { position: [0.5, 0.5, 0.5], tex_coords: [1.0, 1.0], },
-    Vertex { position: [-0.5, 0.5, 0.5], tex_coords: [0.0, 1.0], },
-    ];
-
-const INDICES: &[u16] = &[
-    0, 2, 1,
-    0, 3, 2,
-
-    1, 2, 6,
-    6, 5, 1,
-
-    4, 5, 6,
-    6, 7, 4,
-
-    2, 3, 6,
-    6, 3, 7,
-
-    0, 7, 3,
-    0, 4, 7,
-
-    0, 1, 5,
-    0, 5, 4
-];
