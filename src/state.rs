@@ -94,7 +94,7 @@ impl State {
         };
         surface.configure(&device, &config);
 
-        let diffuse_bytes = include_bytes!("happy-tree.png");
+        let diffuse_bytes = include_bytes!("textures/happy-tree.png");
         let diffuse_texture = texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "happy-tree.png").unwrap();
 
         let texture_bind_group_layout =
@@ -173,6 +173,12 @@ impl State {
         }
     }
 
+    pub fn create_depth_render_pipeline(device: &Device,
+                                        config: &SurfaceConfiguration) -> wgpu::RenderPipeline {
+
+        todo!()
+    }
+
     pub fn create_render_pipeline(
         device: &Device,
         config: &SurfaceConfiguration,
@@ -180,7 +186,7 @@ impl State {
     ) -> wgpu::RenderPipeline {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Just some shaders"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/shaders.wgsl").into()),
         });
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
