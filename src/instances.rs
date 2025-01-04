@@ -1,7 +1,6 @@
-use std::num::NonZeroU32;
-use cgmath::{Deg, Matrix4, prelude::*, Vector3};
-use wgpu::{BindGroupLayout, Buffer};
+use cgmath::{prelude::*, Deg, Matrix4, Vector3};
 use wgpu::util::DeviceExt;
+use wgpu::BindGroupLayout;
 
 pub struct Rotation {
     pub step: cgmath::Matrix4<f32>,
@@ -86,7 +85,6 @@ impl From<Matrix4<f32>> for PodMatrix {
 }
 
 pub struct Instances {
-    pub step: cgmath::Matrix4<f32>,
     pub transformations: Vec<cgmath::Matrix4<f32>>,
     pub layout: wgpu::BindGroupLayout,
     pub buffer: wgpu::Buffer,
@@ -108,13 +106,6 @@ impl Instances {
                 count: None,
             }],
         })
-    }
-
-    fn step() -> Matrix4<f32> {
-        let x_step = cgmath::Matrix4::from_angle_x(Deg(1f32));
-        let y_step = cgmath::Matrix4::from_angle_y(Deg(0.8f32));
-        let step = x_step * y_step;
-        return step;
     }
 
     pub fn count(&self) -> u32 {
@@ -159,7 +150,6 @@ impl Instances {
         });
 
         Self {
-            step: Self::step(),
             transformations,
             layout,
             buffer,

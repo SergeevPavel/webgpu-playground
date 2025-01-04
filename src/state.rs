@@ -1,15 +1,15 @@
 use std::f64::consts::PI;
 
-use wgpu::{util::{DeviceExt}, Device, SurfaceConfiguration, BindGroupLayout};
+use wgpu::{BindGroupLayout, Device, SurfaceConfiguration};
 use winit::{
     dpi::PhysicalPosition,
-    event::{WindowEvent},
+    event::WindowEvent,
     window::Window,
 };
 
-use crate::{texture::{self, Texture}, camera::{CameraModel, CameraUniform, CameraController, CameraState}};
-use crate::mesh::{Mesh, Vertex};
 use crate::instances::{Instances, Rotation};
+use crate::mesh::{Mesh, Vertex};
+use crate::{camera::{CameraState}, texture::{self, Texture}};
 
 pub struct State {
     surface: wgpu::Surface,
@@ -21,8 +21,8 @@ pub struct State {
     background_color: wgpu::Color,
     render_pipeline: wgpu::RenderPipeline,
     mesh: Mesh,
-    diffuse_bind_group: wgpu::BindGroup,
-    camera: CameraState,
+    texture_bind_group: wgpu::BindGroup,
+    camera_state: CameraState,
     rotator: Rotation,
     pub instances: Instances,
     depth_texture: Texture,
@@ -94,8 +94,8 @@ impl State {
         };
         surface.configure(&device, &config);
 
-        let diffuse_bytes = include_bytes!("textures/happy-tree.png");
-        let diffuse_texture = texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "happy-tree.png").unwrap();
+        let tree_texture_bytes = include_bytes!("textures/happy-tree.png");
+        let tree_texture = texture::Texture::from_bytes(&device, &queue, tree_texture_bytes, "happy-tree.png").unwrap();
 
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -122,24 +122,24 @@ impl State {
                 label: Some("texture_bind_group_layout"),
             });
 
-        let diffuse_bind_group = device.create_bind_group(
+        let texture_bind_group = device.create_bind_group(
             &wgpu::BindGroupDescriptor {
                 layout: &texture_bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                        resource: wgpu::BindingResource::TextureView(&tree_texture.view),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+                        resource: wgpu::BindingResource::Sampler(&tree_texture.sampler),
                     }
                 ],
                 label: Some("diffuse_bind_group"),
             }
         );
 
-        let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
+        let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
 
         let mesh = Mesh::new(&device);
 
@@ -165,10 +165,10 @@ impl State {
             background_color: position_to_color(&PhysicalPosition { x: 0f64, y: 0f64 }),
             render_pipeline,
             mesh,
-            camera: camera_state,
+            camera_state,
             rotator,
             instances,
-            diffuse_bind_group,
+            texture_bind_group,
             depth_texture,
         }
     }
@@ -191,7 +191,7 @@ impl State {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: bind_group_layouts,
+                bind_group_layouts,
                 push_constant_ranges: &[],
             });
         return device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -224,7 +224,7 @@ impl State {
                 conservative: false,
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: texture::Texture::DEPTH_FORMAT,
+                format: Texture::DEPTH_FORMAT,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::Less, // 1.
                 stencil: wgpu::StencilState::default(), // 2.
@@ -260,13 +260,13 @@ impl State {
                 true
             }
             _ => {
-                self.camera.controller.process_events(event)
+                self.camera_state.controller.process_events(event)
             },
         }
     }
 
     pub fn update(&mut self) {
-        self.camera.update(&self.queue);
+        self.camera_state.update(&self.queue);
         self.rotator.update(&self.queue);
     }
 
@@ -302,8 +302,8 @@ impl State {
                 }),
             });
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.camera.bind_group, &[]);
+            render_pass.set_bind_group(0, &self.texture_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.camera_state.bind_group, &[]);
             render_pass.set_bind_group(2, &self.rotator.bind_group, &[]);
             render_pass.set_bind_group(3, &self.instances.bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.mesh.vertex_buffer.slice(..));
