@@ -1,6 +1,7 @@
 use std::f64::consts::PI;
 
-use wgpu::{BindGroupLayout, Device, SurfaceConfiguration};
+use wgpu::{BindGroupLayout, CommandEncoder, Device, StoreOp, SurfaceConfiguration, TextureView};
+use wgpu::hal::empty::Encoder;
 use winit::{
     dpi::PhysicalPosition,
     event::WindowEvent,
@@ -10,14 +11,15 @@ use winit::{
 use crate::instances::{Instances, Rotation};
 use crate::mesh::{Mesh, Vertex};
 use crate::{camera::{CameraState}, texture::{self, Texture}};
+use crate::depth_view::DepthView;
 
-pub struct State {
-    surface: wgpu::Surface,
+pub struct State<'a> {
+    surface: wgpu::Surface<'a>,
+    window: &'a Window,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     pub size: winit::dpi::PhysicalSize<u32>,
-    window: Window,
     background_color: wgpu::Color,
     render_pipeline: wgpu::RenderPipeline,
     mesh: Mesh,
@@ -26,25 +28,24 @@ pub struct State {
     rotator: Rotation,
     pub instances: Instances,
     depth_texture: Texture,
+    depth_view: Option<DepthView>
 }
 
-impl State {
+impl <'a> State<'a> {
     // Creating some of the wgpu types requires async code
-    pub async fn new(window: Window) -> Self {
+    pub async fn new(window: &'a Window) -> Self {
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
+            flags: Default::default(),
             dx12_shader_compiler: Default::default(),
+            gles_minor_version: Default::default(),
         });
 
-        // # Safety
-        //
-        // The surface needs to live as long as the window that created it.
-        // State owns the window so this should be safe.
-        let surface = unsafe { instance.create_surface(&window) }.unwrap();
+        let surface = instance.create_surface::<'a>(window).unwrap();
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -58,15 +59,16 @@ impl State {
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::empty(),
                     // WebGL doesn't support all of wgpu's features, so if
                     // we're building for the web we'll have to disable some.
-                    limits: if cfg!(target_arch = "wasm32") {
+                    required_limits: if cfg!(target_arch = "wasm32") {
                         wgpu::Limits::downlevel_webgl2_defaults()
                     } else {
                         wgpu::Limits::default()
                     },
                     label: None,
+                    required_features: Default::default(),
+                    memory_hints: Default::default(),
                 },
                 None, // Trace path
             )
@@ -89,6 +91,7 @@ impl State {
             width: size.width,
             height: size.height,
             present_mode: surface_caps.present_modes[0],
+            desired_maximum_frame_latency: 1,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
         };
@@ -150,18 +153,22 @@ impl State {
         let rotator = Rotation::new(&device, &rotator_bind_group_layout);
         let instances = Instances::new(&device);
 
-        let render_pipeline = Self::create_render_pipeline(&device, &config, &[&texture_bind_group_layout,
-                                                                               &camera_bind_group_layout,
-                                                                               &rotator_bind_group_layout,
-                                                                               &instances.layout]);
+        let bind_group_layouts = [
+            &texture_bind_group_layout,
+            &camera_bind_group_layout,
+            &rotator_bind_group_layout,
+            &instances.layout
+        ];
+        let render_pipeline = Self::create_render_scene_pipeline(&device, &config, &bind_group_layouts);
+        let depth_view = DepthView::new(&device, config.format);
 
         Self {
             surface,
+            window,
             device,
             queue,
             config,
             size,
-            window,
             background_color: position_to_color(&PhysicalPosition { x: 0f64, y: 0f64 }),
             render_pipeline,
             mesh,
@@ -170,16 +177,11 @@ impl State {
             instances,
             texture_bind_group,
             depth_texture,
+            depth_view: Some(depth_view)
         }
     }
 
-    pub fn create_depth_render_pipeline(device: &Device,
-                                        config: &SurfaceConfiguration) -> wgpu::RenderPipeline {
-
-        todo!()
-    }
-
-    pub fn create_render_pipeline(
+    pub fn create_render_scene_pipeline(
         device: &Device,
         config: &SurfaceConfiguration,
         bind_group_layouts: &[&BindGroupLayout]
@@ -194,17 +196,20 @@ impl State {
                 bind_group_layouts,
                 push_constant_ranges: &[],
             });
+
         return device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
+                compilation_options: Default::default(),
                 buffers: &[Vertex::desc()],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "fs_main",
+                compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
                     blend: Some(wgpu::BlendState::REPLACE),
@@ -226,16 +231,17 @@ impl State {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: Texture::DEPTH_FORMAT,
                 depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less, // 1.
-                stencil: wgpu::StencilState::default(), // 2.
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: 1,                         // 2.
-                mask: !0,                         // 3.
-                alpha_to_coverage_enabled: false, // 4.
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
             },
-            multiview: None, // 5.
+            multiview: None,
+            cache: None,
         });
     }
 
@@ -270,6 +276,39 @@ impl State {
         self.rotator.update(&self.queue);
     }
 
+    fn run_cubes_pipeline(&self, view: &TextureView, encoder: &mut CommandEncoder) {
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Render Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(self.background_color),
+                    store: StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth_texture.view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_bind_group(0, &self.texture_bind_group, &[]);
+        render_pass.set_bind_group(1, &self.camera_state.bind_group, &[]);
+        render_pass.set_bind_group(2, &self.rotator.bind_group, &[]);
+        render_pass.set_bind_group(3, &self.instances.bind_group, &[]);
+        render_pass.set_vertex_buffer(0, self.mesh.vertex_buffer.slice(..));
+        render_pass.set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        render_pass.draw_indexed(0..self.mesh.num_indices, 0, 0..self.instances.count());
+
+    }
+
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
@@ -280,38 +319,11 @@ impl State {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
-
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.background_color),
-                        store: true,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_texture.view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: true,
-                    }),
-                    stencil_ops: None,
-                }),
-            });
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.texture_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.camera_state.bind_group, &[]);
-            render_pass.set_bind_group(2, &self.rotator.bind_group, &[]);
-            render_pass.set_bind_group(3, &self.instances.bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.mesh.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..self.mesh.num_indices, 0, 0..self.instances.count())
+        self.run_cubes_pipeline(&view, &mut encoder);
+        if let Some(depth_view) = &self.depth_view {
+            depth_view.render(&view, &mut encoder);
         }
 
-        // submit will accept anything that implements IntoIter
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 

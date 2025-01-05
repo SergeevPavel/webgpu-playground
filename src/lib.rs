@@ -3,14 +3,12 @@ mod texture;
 mod camera;
 mod instances;
 mod mesh;
+mod depth_view;
 
 use state::State;
-use winit::{
-    event::*,
-    event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
-};
-
+use winit::{event::*, event_loop::{ControlFlow, EventLoop}, keyboard, window::WindowBuilder};
+use winit::event::WindowEvent::KeyboardInput;
+use winit::keyboard::{KeyCode, PhysicalKey};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -25,7 +23,7 @@ pub async fn run() {
         }
     }
 
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::new().unwrap();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
     #[cfg(target_arch = "wasm32")]
@@ -48,48 +46,42 @@ pub async fn run() {
         log::warn!("Setup canvas");
     }
 
-    let mut state = State::new(window).await;
+    let mut state = State::new(&window).await;
 
-    event_loop.run(move |event, _, control_flow| {
+    event_loop.run(move |event, control_flow| {
         match event {
-            Event::RedrawRequested(window_id) if window_id == state.window().id() => {
-                state.update();
-                match state.render() {
-                    Ok(_) => {}
-                    // Reconfigure the surface if lost
-                    Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
-                    // The system is out of memory, we should probably quit
-                    Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
-                    // All other errors (Outdated, Timeout) should be resolved by the next frame
-                    Err(e) => eprintln!("{:?}", e),
-                }
-            }
-            Event::MainEventsCleared => {
-                // RedrawRequested will only trigger once, unless we manually
-                // request it.
-                state.window().request_redraw();
-            }
             Event::WindowEvent {
                 ref event,
                 window_id,
             } if window_id == state.window().id() => {
                 if !state.input(event) { // UPDATED!
                     match event {
+                        WindowEvent::RedrawRequested => {
+                            state.window().request_redraw();
+                            state.update();
+                            match state.render() {
+                                Ok(_) => {}
+                                // Reconfigure the surface if lost
+                                Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
+                                // The system is out of memory, we should probably quit
+                                Err(wgpu::SurfaceError::OutOfMemory) => control_flow.exit(),
+                                // All other errors (Outdated, Timeout) should be resolved by the next frame
+                                Err(e) => eprintln!("{:?}", e),
+                            }
+                        }
+
                         WindowEvent::CloseRequested
                         | WindowEvent::KeyboardInput {
-                            input:
-                                KeyboardInput {
+                            event:
+                                KeyEvent {
                                     state: ElementState::Pressed,
-                                    virtual_keycode: Some(VirtualKeyCode::Escape),
+                                    physical_key: keyboard::PhysicalKey::Code(KeyCode::Escape),
                                     ..
                                 },
                             ..
-                        } => *control_flow = ControlFlow::Exit,
+                        } => control_flow.exit(),
                         WindowEvent::Resized(physical_size) => {
                             state.resize(*physical_size);
-                        }
-                        WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                            state.resize(**new_inner_size);
                         }
                         _ => {}
                     }
@@ -97,5 +89,5 @@ pub async fn run() {
             }
             _ => {}
         }
-    });
+    }).unwrap();
 }
