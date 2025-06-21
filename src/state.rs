@@ -45,7 +45,7 @@ impl <'a> State<'a> {
             gles_minor_version: Default::default(),
         });
 
-        let surface = instance.create_surface::<'a>(window).unwrap();
+        let surface = instance.create_surface(window).unwrap();
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -104,24 +104,24 @@ impl <'a> State<'a> {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
-                    binding: 0,
+                        binding: 0,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
-                        multisampled: false,
+                            multisampled: false,
                             view_dimension: wgpu::TextureViewDimension::D2,
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         },
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                        binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         // This should match the filterable field of the
                         // corresponding Texture entry above.
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
-                    ],
+                ],
                 label: Some("texture_bind_group_layout"),
             });
 
@@ -160,7 +160,7 @@ impl <'a> State<'a> {
             &instances.layout
         ];
         let render_pipeline = Self::create_render_scene_pipeline(&device, &config, &bind_group_layouts);
-        let depth_view = DepthView::new(&device, config.format);
+        let depth_view = DepthView::new(&device, config.format, &depth_texture);
 
         Self {
             surface,
@@ -256,6 +256,12 @@ impl <'a> State<'a> {
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
             self.depth_texture = Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
+            match &mut self.depth_view {
+                Some(depth_view) => {
+                    depth_view.set_depth_texture(&self.device, &self.depth_texture);
+                }
+                _ => {}
+            }
         }
     }
 
